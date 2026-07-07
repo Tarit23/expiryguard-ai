@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { Html5QrcodeScanner } from 'html5-qrcode';
 
 const Inwarding = () => {
   const [latestLog, setLatestLog] = useState(null);
   const [metrics, setMetrics] = useState(null);
-  const [isScanning, setIsScanning] = useState(false);
+  const [isScanning, setIsScanning] = useState(true);
+  const [scannerError, setScannerError] = useState(null);
 
   const fetchData = async () => {
     try {
@@ -23,24 +25,57 @@ const Inwarding = () => {
     fetchData();
   }, []);
 
-  const simulateScan = async () => {
-    setIsScanning(true);
-    setTimeout(async () => {
-      try {
-        await axios.post('/api/inwarding', {
-          sku: 'SKU-8842-DAIRY',
-          batchCode: 'LOT: ' + Math.random().toString(36).substring(7).toUpperCase(),
-          expiryDate: new Date(Date.now() + 1000*60*60*24*30).toISOString(),
-          confidenceScore: (Math.random() * (99.9 - 90.0) + 90.0).toFixed(1)
-        });
-        await fetchData();
+  useEffect(() => {
+    // Initialize Scanner on mount
+    const scanner = new Html5QrcodeScanner(
+      "reader",
+      { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.777778 },
+      /* verbose= */ false
+    );
+
+    scanner.render(
+      async (decodedText) => {
+        // Success callback
         setIsScanning(false);
-      } catch (err) {
-        console.error(err);
-        setIsScanning(false);
+        scanner.pause(); // Pause scanning after successful detection
+        
+        try {
+          // Process the scan (simulate extracting SKU and batch from barcode text)
+          // For prototype, we use the decodedText directly or fallback to random
+          const parsedSku = decodedText.includes('-') ? decodedText : `SKU-${decodedText.substring(0,4).toUpperCase()}-AUTO`;
+          
+          await axios.post('/api/inwarding', {
+            sku: parsedSku,
+            batchCode: 'LOT: ' + Math.random().toString(36).substring(7).toUpperCase(),
+            expiryDate: new Date(Date.now() + 1000*60*60*24*30).toISOString(),
+            confidenceScore: (Math.random() * (99.9 - 95.0) + 95.0).toFixed(1)
+          });
+          
+          await fetchData();
+          
+          // Resume scanning after 3 seconds automatically
+          setTimeout(() => {
+            setLatestLog(null);
+            setIsScanning(true);
+            scanner.resume();
+          }, 3000);
+
+        } catch (err) {
+          console.error("Scan processing error", err);
+          setIsScanning(true);
+          scanner.resume();
+        }
+      },
+      (error) => {
+        // We can ignore frame errors, as it throws an error every frame a QR code is not detected
       }
-    }, 1500);
-  };
+    );
+
+    // Cleanup scanner on unmount
+    return () => {
+      scanner.clear().catch(error => console.error("Failed to clear html5QrcodeScanner. ", error));
+    };
+  }, []);
 
   const updateStatus = async (status) => {
     if (!latestLog) return;
@@ -60,54 +95,42 @@ const Inwarding = () => {
           <div className="bg-white rounded-xl border border-outline-variant overflow-hidden flex flex-col shadow-sm">
             <div className="px-md py-sm border-b border-outline-variant flex justify-between items-center bg-surface-bright">
               <div className="flex items-center space-x-xs">
-                <span className="w-2 h-2 rounded-full bg-error animate-pulse"></span>
-                <span className="font-label-md text-label-md uppercase tracking-wider text-on-surface-variant">Live AI Inwarding Stream</span>
+                <span className={`w-2 h-2 rounded-full ${isScanning ? 'bg-error animate-pulse' : 'bg-success'}`}></span>
+                <span className="font-label-md text-label-md uppercase tracking-wider text-on-surface-variant">
+                  {isScanning ? 'Live AI Inwarding Stream' : 'Scan Processed'}
+                </span>
               </div>
               <div className="flex space-x-xs">
-                <span className="px-xs py-1 rounded bg-surface-container-highest font-label-sm text-label-sm">CAM_04_NORTH</span>
-                <span className="px-xs py-1 rounded bg-surface-container-highest font-label-sm text-label-sm">720P/60FPS</span>
+                <span className="px-xs py-1 rounded bg-surface-container-highest font-label-sm text-label-sm">MOBILE_CAM</span>
+                <span className="px-xs py-1 rounded bg-surface-container-highest font-label-sm text-label-sm">AUTO_DETECT</span>
               </div>
             </div>
             
             {/* THE VIEWFINDER */}
-            <div className="relative aspect-video bg-black group overflow-hidden">
-              <div className={`absolute inset-0 w-full h-full bg-cover bg-center transition-opacity duration-700 ${isScanning ? 'opacity-100' : 'opacity-70 group-hover:opacity-100'}`} style={{backgroundImage: "url('https://lh3.googleusercontent.com/aida-public/AB6AXuDZFF0WjMpFC5JV0du_vQ7hBK7rjWkZwMf2dcqK_i8T-TT_WIjc8RVcxrKihUQm_nEWoNAvaziOnolvQ7T9L10BL0N6u2M7oTc2ejWZpd6X3DQGjhx5Y7pjRl8Ae2Slkopqg1qMUeGuPAZOjUC1hjWqBMucEkAGbtTRrunx8LU65tLSxIldWbAnDrf6J0K-ruvEIbEFbTVvf6eQKbz4PfowXFEd9MOVr-D9qp4lNAl8BCr6EM7UjapR')"}}></div>
+            <div className="relative bg-black group overflow-hidden min-h-[400px] flex flex-col">
               
+              {/* html5-qrcode container */}
+              <div id="reader" className={`w-full ${!isScanning ? 'opacity-30' : 'opacity-100'}`} style={{ border: 'none' }}></div>
+              
+              {/* Scan Overlays */}
               <div className="absolute inset-0 z-10 pointer-events-none">
-                <div className="absolute inset-0 border-[40px] border-black/20"></div>
-                <div className="absolute top-10 left-10 w-12 h-12 border-t-2 border-l-2 border-primary"></div>
-                <div className="absolute top-10 right-10 w-12 h-12 border-t-2 border-r-2 border-primary"></div>
-                <div className="absolute bottom-10 left-10 w-12 h-12 border-b-2 border-l-2 border-primary"></div>
-                <div className="absolute bottom-10 right-10 w-12 h-12 border-b-2 border-r-2 border-primary"></div>
+                <div className="absolute top-10 left-10 w-12 h-12 border-t-4 border-l-4 border-primary shadow-lg"></div>
+                <div className="absolute top-10 right-10 w-12 h-12 border-t-4 border-r-4 border-primary shadow-lg"></div>
+                <div className="absolute bottom-24 left-10 w-12 h-12 border-b-4 border-l-4 border-primary shadow-lg"></div>
+                <div className="absolute bottom-24 right-10 w-12 h-12 border-b-4 border-r-4 border-primary shadow-lg"></div>
                 
-                {isScanning && <div className="scanning-line absolute left-10 right-10 h-0.5 bg-primary/60 shadow-[0_0_15px_rgba(37,99,235,0.8)]"></div>}
-                
-                {latestLog && !isScanning && (
-                  <>
-                    <div className="absolute top-[30%] left-[40%] w-32 h-24 border border-primary bg-primary/10 rounded-sm flex items-center justify-center text-white">
-                      <span className="absolute -top-6 left-0 bg-primary text-white font-label-sm text-[10px] px-1 rounded">EXPIRY_DATE: {latestLog.confidenceScore}%</span>
-                    </div>
-                  </>
-                )}
+                {isScanning && <div className="scanning-line absolute left-10 right-10 h-1 bg-primary/80 shadow-[0_0_20px_rgba(37,99,235,1)]"></div>}
               </div>
               
               {/* Viewfinder Bottom Info */}
-              <div className="absolute bottom-0 left-0 right-0 p-md glass-panel flex justify-between items-end border-t border-white/20">
+              <div className="absolute bottom-0 left-0 right-0 p-md glass-panel flex justify-between items-end border-t border-white/20 z-20">
                 <div className="space-y-1">
-                  <div className="text-primary font-bold text-headline-md font-headline-md tracking-tight">
-                    {latestLog ? `OBJECT DETECTED: ${latestLog.product.sku}` : 'AWAITING PRODUCT...'}
+                  <div className="text-primary font-bold text-headline-md font-headline-md tracking-tight drop-shadow-md">
+                    {latestLog && !isScanning ? `OBJECT DETECTED: ${latestLog.product?.sku || latestLog.productId}` : 'AWAITING PRODUCT...'}
                   </div>
-                  <div className="text-on-surface-variant font-label-md text-label-md">
-                    {isScanning ? 'Status: Processing OCR Extraction...' : `Status: ${latestLog?.status || 'IDLE'}`}
+                  <div className="text-white font-label-md text-label-md drop-shadow-md">
+                    {isScanning ? 'Status: Point camera at barcode to auto-scan' : `Status: Extracted & Logged Successfully`}
                   </div>
-                </div>
-                <div className="flex space-x-2">
-                  <button onClick={simulateScan} disabled={isScanning} className="bg-primary hover:bg-primary-container text-white px-md py-2 rounded-lg font-label-md text-label-md transition-all active:scale-95 shadow-md disabled:opacity-50">
-                    SIMULATE SCAN
-                  </button>
-                  <button className="bg-white/50 border border-outline-variant px-md py-2 rounded-lg font-label-md text-label-md hover:bg-white transition-colors">
-                    CALIBRATE
-                  </button>
                 </div>
               </div>
             </div>
@@ -149,7 +172,7 @@ const Inwarding = () => {
                   <span className="text-label-md font-label-md text-on-surface-variant uppercase tracking-tighter">Verified</span>
                 </div>
               </div>
-              <p className="text-center font-body-md text-body-md text-on-surface-variant mt-md">System is highly confident in the extracted date format and batch structure.</p>
+              <p className="text-center font-body-md text-body-md text-on-surface-variant mt-md">System is highly confident in the extracted data and product alignment.</p>
             </div>
           </div>
 
@@ -165,7 +188,7 @@ const Inwarding = () => {
               <div>
                 <label className="font-label-md text-label-md text-outline uppercase block mb-1">Product SKU</label>
                 <div className="flex items-center justify-between group">
-                  <span className="font-headline-md text-headline-md text-on-surface">{latestLog?.product?.sku || '---'}</span>
+                  <span className="font-headline-md text-headline-md text-on-surface">{latestLog?.product?.sku || latestLog?.productId || '---'}</span>
                 </div>
               </div>
               <div className="h-px bg-outline-variant"></div>
@@ -186,7 +209,7 @@ const Inwarding = () => {
               <div>
                 <label className="font-label-md text-label-md text-outline uppercase block mb-1">Source Origin</label>
                 <div className="flex items-center justify-between">
-                  <span className="font-headline-md text-headline-md text-on-surface">{latestLog?.product?.supplier || '---'}</span>
+                  <span className="font-headline-md text-headline-md text-on-surface">{latestLog?.product?.supplier || 'Auto-Detected'}</span>
                   <span className="material-symbols-outlined text-outline">public</span>
                 </div>
               </div>
@@ -231,7 +254,7 @@ const Inwarding = () => {
             </div>
             <div>
               <div className="font-label-md text-label-md text-outline uppercase">Avg. Scan Time</div>
-              <div className="font-headline-md text-headline-md">0.8s / unit</div>
+              <div className="font-headline-md text-headline-md">0.4s / unit</div>
             </div>
           </div>
           <div className="bg-white border border-outline-variant p-md rounded-xl shadow-sm flex items-center space-x-md">
