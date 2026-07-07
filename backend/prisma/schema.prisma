@@ -1,0 +1,37 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Product {
+  id          String   @id @default(uuid())
+  sku         String   @unique
+  name        String
+  supplier    String
+  logs        InwardingLog[]
+}
+
+model InwardingLog {
+  id              String   @id @default(uuid())
+  productId       String
+  product         Product  @relation(fields: [productId], references: [id])
+  batchCode       String
+  expiryDate      DateTime
+  confidenceScore Float
+  status          String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  cameraSource    String   @default("CAM_04_NORTH")
+  createdAt       DateTime @default(now())
+}
+
+model Alert {
+  id          String   @id @default(uuid())
+  type        String   // HYGIENE, TEMPERATURE, ANOMALY
+  severity    String   // LOW, MEDIUM, HIGH, CRITICAL
+  message     String
+  status      String   @default("ACTIVE") // ACTIVE, RESOLVED
+  createdAt   DateTime @default(now())
+}
